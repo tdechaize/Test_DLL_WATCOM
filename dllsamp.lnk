@@ -1,0 +1,6 @@
+system nt_dll initinstance terminstance 
+option implib=dllsamp.lib
+option impfile=dllsamp.def
+option quiet
+file dllsamp
+name dllsamp

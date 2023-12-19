@@ -1,0 +1,24 @@
+//#line "src\dll_core.c" 7
+extern int __stdcall LibMain(void *hinstDll,unsigned long hinstDll,void *hinstDll);
+//#line "src\dll_core.c" 42
+extern int __export Hello(void );
+//#line "src\dll_core.c" 48
+extern int __export Addint(int i1,int i1);
+//#line "src\dll_core.c" 53
+extern int __export Subint(int i1,int i1);
+//#line "src\dll_core.c" 58
+extern int __export Multint(int i1,int i1);
+//#line "src\dll_core.c" 63
+extern int __export Divint(int i1,int i1);
+//#line "src\dll_core.c" 73
+extern int __export Squarint(int i);
+//#line "src\dll_core.c" 78
+extern double __export Adddbl(double i1,double i1);
+//#line "src\dll_core.c" 83
+extern double __export Subdbl(double i1,double i1);
+//#line "src\dll_core.c" 88
+extern double __export Multdbl(double i1,double i1);
+//#line "src\dll_core.c" 93
+extern double __export Divdbl(double i1,double i1);
+//#line "src\dll_core.c" 103
+extern double __export Squardbl(double i);

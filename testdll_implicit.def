@@ -1,0 +1,2 @@
+//#line "src\testdll_implicit.c" 6
+extern int __watcall main(int argc,char **argc);

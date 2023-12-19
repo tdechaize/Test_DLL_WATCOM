@@ -1,0 +1,1711 @@
+					 Bilan concernant la construction et les tests d'une DLL 
+		avec le compilateur Open Watcom 32 bits et 64 bits version 2.0 sur Windows 11 64 bits
+	 
+Tout d'abord rappelons l'installation préalable de ces compilateurs C qui proviennent d'un long historique 
+mais qui donnent encore de très bon résultats malgrè encore quelques interrogations, que je n'ai pu 
+totalement résoudre. 
+
+A partir du site https://github.com/open-watcom/open-watcom-v2/releases/tag/Current-build, il faut télécharger le 
+fichier suivant : "open-watcom-2_0-c-win-x64.exe", puis l'exécuter pour obtenir l'installation.
+
+J'ai installé ces compilateurs sur C:\WATCOM proposé par défaut, mais tout autre répertoire est possible. 
+
+On peut aussi trouver sur Internet des manuels d'utilisation :
+	"Programmer's guide" : 	https://open-watcom.github.io/open-watcom-1.9/pguide.html
+	"User's guide" : 		https://open-watcom.github.io/open-watcom-1.9/cguide.html
+	"Tools User's guide" :	https://open-watcom.github.io/open-watcom-v2-wikidocs/ctools.pdf
+	"OW2 Linker's guide" :	https://open-watcom.github.io/open-watcom-v2-wikidocs/lguide.html
+
+En préambule, j'ai aussi consulté sur Internet quelques bons tutos sur la construction de DLL et leurs
+utilisations.
+
+Voici une liste non exhaustive de ces recherches :
+	a) sur le site "developpez.com" (https://www.developpez.com/), un trés bon tutoriel expliquant les deux
+		modes d'usage d'une DLL : le mode explicite avec des fonctions Windows et le mode implicite (présence
+		de la DLL dans le PATH) : https://melem.developpez.com/tutoriels/api-windows/bibliotheques-dynamiques-dlls/
+	b) un excellent article de Mark Payne sur la construction d'une DLL, versionnée ou non, et avec ressources :
+		https://www.transmissionzero.co.uk/computing/building-dlls-with-mingw/
+		Avec cet exemple, la présence d'un fichier d'include avec l'astuce de tester la présence d'une "variable define" 
+		lors des compilations permettant de préfixer les functions par "__declspec(dllexport)" pour la génération de la DLL,
+		et par le préfixage par "__declspec(dllimport)" lors de l'utilisation de la DLL, me semblait fortement souhaité.
+	b) l'exemple de Chris Wellons "How to build and use DLLs on Windows" (très instructif)
+				https://nullprogram.com/blog/2021/05/31/
+	c) Pour l'environnement CYGWIN, j'ai trouvé ceci : https://www.cygwin.com/cygwin-ug-net/dll.html
+	d) Pour les débutants : https://www.codeguru.com/cplusplus/dll-tutorial-for-beginners/
+	e) En dernier, pour ceux qui s'intéressent aux différents types d'appels de fonctions, l'excellent article
+		de WikiPedia : https://en.wikipedia.org/wiki/X86_calling_conventions
+
+Dans le premier manuel "Programmer's guide", j'ai trouvé un exemple de création et d'utilisation d'une DLL 
+avec Open Watcom V1.9, qui illustre un chargement implicite d'une DLL (présence dans le PATH ou dans le répertoire
+courant de la DLL appelée).
+ 
+Liste de mes fichiers sources : dllsamp.c et dlltest.c :
+
+dllsamp.c :
+
+//*******************           File : dllsamp.c (main core of dll)          *****************
+#include <stdio.h> 
+#include <windows.h> 
+
+#if defined(__cplusplus) 
+#define EXPORTED extern "C" __declspec( dllexport ) 
+#else 
+#define EXPORTED __declspec( dllexport ) 
+#endif 
+
+DWORD TlsIndex; /* Global Thread Local Storage index */ 
+
+/* Error checking should be performed in following code */ 
+
+BOOL APIENTRY LibMain( 	HANDLE hinstDLL, 
+						DWORD  fdwReason, 
+						LPVOID lpvReserved ) 
+{ 
+   switch( fdwReason ) { 
+       case DLL_PROCESS_ATTACH: 
+       /* do process initialization */ 
+
+       /* create TLS index */ 
+          TlsIndex = TlsAlloc();
+		  printf( "Process attached to DLL.\n" ); 
+          break; 
+
+      case DLL_THREAD_ATTACH: 
+      /* do thread initialization */ 
+
+      /* allocate private storage for thread */ 
+      /* and save pointer to it */ 
+          TlsSetValue( TlsIndex, malloc(200) ); 
+		  printf( "Thread attached to DLL.\n" ); 
+          break; 
+
+      case DLL_THREAD_DETACH: 
+      /* do thread cleanup */ 
+
+      /* get the TLS value and free associated memory */ 
+		  printf( "Thread detached to DLL.\n" ); 
+          free( TlsGetValue( TlsIndex ) ); 
+          break; 
+
+      case DLL_PROCESS_DETACH: 
+      /* do process cleanup */ 
+
+      /* free TLS index */ 
+		  printf( "Process detached to DLL.\n" ); 
+          TlsFree( TlsIndex ); 
+          break; 
+   } 
+   return( 1 );                  /* indicate success */ 
+/* returning 0 indicates initialization failure */ 
+} 
+
+EXPORTED void dll_entry_1( void ) 
+{ 
+     printf( "Hi from dll entry #1\n" ); 
+} 
+
+EXPORTED void dll_entry_2( void ) 
+{ 
+     printf( "Hi from dll entry #2\n" ); 
+}
+//*******************               End file : dllsamp.c                *****************
+
+dlltest.c  (test de la DLL avec chargement implicite)
+
+//*******************       File : dlltest.c (program test of DLL with implicit load )       *****************
+#include <stdio.h> 			//   Needed for printf function
+#include <dos.h> 			//   Needed for sleep function
+#include <process.h> 		//   Needed for all thread functions
+#include <windows.h> 		// 	 Not needed !!! Stange, where are declared motifs to declare or call functions of DLL __declspec( dllexport ) or __declspec( dllimport ) ?
+//									Load by default ?
+
+#if defined(__cplusplus) 
+#define IMPORTED extern "C" __declspec( dllimport ) 
+#else 
+#define IMPORTED __declspec( dllimport ) 
+#endif 
+
+IMPORTED void dll_entry_1( void ); 
+IMPORTED void dll_entry_2( void ); 
+
+#define STACK_SIZE 8192 
+
+static void thread( void *arglist ) 
+{ 
+  printf( "Hi from thread\n" ); 
+  _endthread(); 
+} 
+
+int main( void ) 
+{ 
+   unsigned long tid; 
+
+   dll_entry_1(); 
+   tid = _beginthread( thread, STACK_SIZE, NULL ); 
+   dll_entry_2(); 
+   return( 0 ); 
+} 
+//*******************       			End file : dlltest.c       					*****************
+
+J'ai installé ces sources sur le répertoire C:\src\Watcom\TestDLL, mais tout autre répertoire peut être utilisé.
+
+Pour compiler et linker ces deux sources, j'ai créé deux fichiers de commande très simple pour générer les DLL
+soit en version 32 bits, soit en 64 bits (donc après avoir rajouter C:\WATCOM\binnt dans le PATH ou C:\WATCOM\binnt64).
+
+Le premier fichier de commande, je le dénomme : "generate_testdll_ow32_ok.cmd" et voici son contenu :
+
+@echo off
+set PATHINIT=%PATH%
+set PATH=C:\WATCOM\binnt;%PATH%
+REM 	Compile only main core of DLL
+echo.   **************        Compile only main core of DLL      ****************
+wcc386 -q -bd dllsamp -i=C:\WATCOM\h\nt -i=C:\WATCOM\h
+REM 	Link main core of DLL with directive file dllsamp.lnk
+echo.   *******  Link main core of DLL with directive file dllsamp.lnk  *********
+wlink @dllsamp.lnk
+REM 	Mandatory, because directives of precedent link don't generate this library.
+echo.   **************         Generate lib file from DLL        ****************
+wlib -q -n dllsamp +dllsamp.dll
+REM 	Dump export functions of DLL 
+echo.   **************         Dump export functions of DLL      ****************
+wdump -i dllsamp.dll
+REM 	Compile and link test program of DLL
+echo.   **************   Compile and link test program of DLL    ****************
+wcl386 -q -bm -l=nt dlltest dllsamp.lib -i=C:\WATCOM\h\nt -i=C:\WATCOM\h
+REM 	Execute test program of DLL (version 32 bits)
+echo.   *********   Execute test program of DLL (version 32 bits)  **************
+dlltest
+set PATH=%PATHINIT%
+
+Le fichier de directives "dllsamp.lnk" contient les informations suivantes :
+
+system nt_dll initinstance terminstance 
+option implib=dllsamp.lib
+option impfile=dllsamp.def
+option quiet
+file dllsamp
+name dllsamp
+
+Le deuxième fichier de commande, je le dénomme : "generate_testdll_ow64_ok.cmd" et voici son contenu :
+
+@echo off
+set PATHINIT=%PATH%
+set PATH=C:\WATCOM\binnt64;%PATH%
+REM 	Compile only main core of DLL
+echo.   **************        Compile only main core of DLL      ****************
+wcc386 -q -bd dllsamp -v -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fo=dllsamp64.obj
+REM 	Link main core of DLL with directive file dllsamp64.lnk
+echo.   ******* Link main core of DLL with directive file dllsamp64.lnk *********
+wlink @dllsamp64.lnk
+REM    Mandatory, because directive of precedent link don't generate this library.
+echo.   **************         Generate lib file from DLL        ****************
+wlib -q -n dllsamp64 +dllsamp64.dll
+REM 	Dump export functions of DLL
+echo.   **************         Dump export functions of DLL      ****************
+wdump -i dllsamp64.dll
+REM 	Compile and link test program of DLL
+echo.   **************   Compile and link test program of DLL    ****************
+wcl386 -q -bm -l=nt dlltest dllsamp64.lib -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fe=dlltest64.exe
+REM 	Execute test program of DLL (version 64 bits)
+echo.   *********   Execute test program of DLL (version 64 bits)  **************
+dlltest64
+set PATH=%PATHINIT%
+
+Le fichier de directives "dllsamp64.lnk"  contient les informations suivantes :
+
+system nt_dll initinstance terminstance
+option implib=dllsamp64.lib
+option impfile=dllsamp64.def
+option quiet
+file dllsamp64
+name dllsamp64
+
+Voic le résultat de l'exécution du premier script (mode 32 bits) :
+
+generate_testdll_ow32_ok.cmd
+
+   **************        Compile only main core of DLL      ****************
+   *******  Link main core of DLL with directive file dllsamp.lnk  *********
+   **************         Generate lib file from DLL        ****************
+   **************         Dump export functions of DLL      ****************
+
+dll_entry_1_.'DLLSAMP.DLL'.1
+dll_entry_2_.'DLLSAMP.DLL'.2
+   **************   Compile and link test program of DLL    ****************
+   *********   Execute test program of DLL (version 32 bits)  **************
+Process attached to DLL.
+Hi from dll entry #1
+Hi from dll entry #2
+Thread attached to DLL.
+Thread detached to DLL.
+Process detached to DLL.
+
+Puis le résultat du deuxième script (mode 64 bits) :
+
+generate_testdll_ow64_ok.cmd
+
+   **************        Compile only main core of DLL      ****************
+   ******* Link main core of DLL with directive file dllsamp64.lnk *********
+   **************         Generate lib file from DLL        ****************
+   **************         Dump export functions of DLL      ****************
+
+dll_entry_1_.'DLLSAMP64.DLL'.1
+dll_entry_2_.'DLLSAMP64.DLL'.2
+   **************   Compile and link test program of DLL    ****************
+   *********   Execute test program of DLL (version 64 bits)  **************
+Process attached to DLL.
+Hi from dll entry #1
+Hi from dll entry #2
+Thread attached to DLL.
+Thread detached to DLL.
+Process detached to DLL.
+
+Remarque a posteriori : comme avec la ligne de commande du linker, il ne faut pas cumuler
+dans le fichier de directives les option "implib=xxxxx" et "impfile=xxxxxx", sinon seule
+la génération du fichier de définition est réalisée. Si vous enlevez l'option de generation
+du fichier de définition, alors la librairie est correctement constituée. 
+J'ai alors tester "a posteriori" sans changer le fichier de directive, mais en créant 
+explicitement la librairie avec la commanda "wlib", et j'ai examiné alors les fichiers de 
+définitions générés par l'option qui reste "seule" active "impfile=xxxxx".
+Ils sont de la forme suivante (remarquez le suffixage des symboles par "_" ...) :
+++'dll_entry_1_'.'dllsamp64.dll'..'dll_entry_1_'
+++'dll_entry_2_'.'dllsamp64.dll'..'dll_entry_2_'
+Nous verrons plus loin, au combien ils sont utiles ... a tout à l'heure ...
+
+Comme, on peut le voir, aucune difficulté pour générer une DLL et puis la tester avec un 
+programme de test en C. La seule "anomalie" est la preuve de fonctionnement de la thread
+qui n'apparait pas, ni en 32 ni en 64 bits, avec son propre "printf( "Hi from thread\n" );".
+Mais, ce n'est pas mon sujet, je suis plus intéressé par les appels de fonction d'une DLL, et 
+ceux-ci apparaissent avec succès dans ces deux tests avec les deux "traces" suivantes :
+	Hi from dll entry #1
+	Hi from dll entry #2
+	
+A noter, que je n'ai pas besoin de déclarer les fonctions exportées dans un fichier de définition
+spécifique avec ce compilateur, les motifs __declspec( dllexport ) et __declspec( dllimport )
+suffisent à rendre les déclarations et les appels de fonctions de la DLL transparentes.
+Ce qui rend ce compilateur parfaitement conforme aux recommandations de Microsoft, avec 
+l'inconvénient de suffixer alors les symboles par "_", ce que je vais essayer de rendre 
+plus "naturel" avec des appels directement sans aucun suffixe (ni préfixe ...).
+
+Dernier point, les traces des "attachements" et "détachements" de la thread auprès de la DLL
+n'apparaissent pas toujours (cela va trop vite ???) lors des tests. J'en ai lancé plusieurs 
+fois de suite pour voir enfin apparaître les deux traces successives (parfois une seule ???) :
+	Thread attached to DLL.
+	Thread detached to DLL.
+
+Je laisse à la sagacité des lecteurs le fait de "debuguer" ce point liès au fonctionnement
+des threads liées avec une DLL (Peut-être dans les directives du linker : 
+		"initthread termthread"           ou encore 
+		"initglobal termglobal").
+
+A partir de ce constat très positif, je dédide changer les sources de cet exemple, et de 
+l'amender avec un programme de test avec chargement explicite de la DLL constituée, et enfin
+de rajouter des fonctions à notre DLL afin de la rendre un peu plus complexe : des opérations sur 
+les entiers, mais aussi sur des doubles flottants.
+
+Voici mes nouveaux sources : dll_core.c, dll_share.h, testdll_implicit.c.
+En créant un nouveau fichier d'include "partagé", je suis les recommandations de Mark Payne, et
+je rajoute un programme de test avec chargement explicite de la DLL (testdll_explicit.c), enfin je
+déplace ces sources sur un nouveau répertoire "src" (recommandé avec l'usage de CMAKE par exemple).
+
+Je modifie en conséquence le script de compilation et d'édition des liens : compile_link_dll_OW_OK.bat
+en le paramétrant avec la possibilité de générer en version 32 bits ou en version 64 bits, mais
+aussi en une seule passe (compilation + link dans la même instruction) ou en deux passes (compilation
+puis un link séparès en deux instructions).
+
+Listons ces différents codes sources :
+
+"dll_core.c" :
+
+//*********************    File : dll_core.c (main core of dll)    *****************
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <stdio.h>
+#include "dll_share.h"
+
+BOOL APIENTRY LibMain(void *hinstDll,unsigned long 
+                          dwReason,void *reserved)
+{
+    switch( dwReason ) {
+    case DLL_PROCESS_ATTACH:
+        printf( "DLL attaching to process...\n" );
+        break;
+    case DLL_PROCESS_DETACH:
+        printf( "DLL detaching from process...\n" );
+        break;
+		// The attached process creates a new thread.
+	case DLL_THREAD_ATTACH:
+		printf("The attached process creating a new thread...\n");
+		break;
+		// The thread of the attached process terminates.
+	case DLL_THREAD_DETACH:
+		printf("The thread of the attached process terminates...\n");
+		break;
+	default:
+		printf("Reason called not matched, error if any : %ld...\n", GetLastError());
+		break;
+    }
+    return( 1 );    /* Indicate success */
+}
+
+FUNCAPI int Hello(void)
+ {
+    printf( "Hello from a DLL!\n" );
+    return( 0 );
+ }
+
+FUNCAPI int Addint(int i1, int i2)
+ {
+	printf( "In function Addint, premier parametre %i, deuxieme parametre %i\n", i1, i2 );
+	return i1 + i2; 
+ }
+ 
+FUNCAPI int Subint(int i1, int i2)
+ {
+	printf( "In function Subint, premier parametre %i, deuxieme parametre %i\n", i1, i2 );
+	return i1 - i2;
+ }
+
+FUNCAPI int Multint(int i1, int i2)
+ { 
+    printf( "In function Multint, premier parametre %i, deuxieme parametre %i\n", i1, i2 );
+    return i1 * i2;
+ }
+
+FUNCAPI int Divint(int i1, int i2) 
+ {
+  if (i2 == 0) { 
+     printf("La division par zero n'est pas autorisee, le retour vaut 1 par défaut.\n");
+     return(1);
+  } else { 
+	  return (i1/i2);
+  }
+ }
+ 
+FUNCAPI int Squarint(int i)
+ {  
+   return i * i;
+ }
+
+FUNCAPI double Adddbl(double i1, double i2)
+ {
+	return i1 + i2;
+ }
+ 
+FUNCAPI double Subdbl(double i1, double i2)
+ {
+	return i1 - i2;
+ }
+
+FUNCAPI double Multdbl(double i1, double i2)
+ { 
+   return i1 * i2;
+ }
+ 
+ FUNCAPI double Divdbl(double i1, double i2) 
+ {
+  if (i2 == 0.0) { 
+     printf("La division par zero n'est pas autorisee, le retour vaut 1 par défaut.\n");
+     return(1.0);
+  } else   {
+	  return (i1/i2);
+  }
+ }
+
+FUNCAPI double Squardbl(double i)
+ { 
+   return i * i;
+ }
+ //******************************    End file : dll_core.c   *********************************
+
+Le fichier d'include partagé : "dll_share.h" :
+
+//*********************    File : dll_share.h (include file shared beetween core DLL and program test DLL)    *****************
+#ifndef HEADER_SHARED_DLL
+#define HEADER_SHARED_DLL
+
+/* Test Windows platform */
+
+#if defined(__NT__) || defined(_WIN32) || defined(_Windows) // __NT__ with OpenWatcom, _WIN32 with GCC, MSVC, clang, Pelles C, lcc (?) _Windows with Borland C/C++ defined Windows Platforms
+
+  /* You should define BUILD_DLL *only* when building the DLL. */
+  
+  #ifdef BUILD_DLL
+    #define FUNCAPI  __declspec(dllexport)
+  #else
+    #define FUNCAPI  __declspec(dllimport)
+  #endif
+
+  /* Define calling convention in one place, for convenience. */
+  #if defined(__LCC__) // || defined(__WATCOMC__)
+    #define FUNCCALL  __stdcall
+  #elif defined (__BORLANDC__) || defined(__POCC__)
+    #define FUNCCALL  __stdcall
+  #else	
+    #define FUNCCALL  __cdecl
+  # endif
+
+
+#elif defined(__linux__) || defined(__unix__) || defined(__APPLE__) || defined(__FreeBSD__)
+
+	#if defined(BUILD_DLL) && defined(HAS_GCC_VISIBILITY)
+	#   define FUNCAPI  _attribute_  _((visibility("default")))
+	#endif
+
+#else /* __NT__ or _WIN32 or _Windows or __linux__ or __unix__ or __APPLE__ (MAC OS) or __FreeBSD__ not defined. */
+
+  /* Define with no value on non-Windows OSes. */
+  #define FUNCAPI
+  #define FUNCCALL
+
+#endif
+
+extern FUNCAPI int Hello(void);
+extern FUNCAPI int Addint(int i1, int i2);
+extern FUNCAPI int Subint(int i1, int i2);
+extern FUNCAPI int Multint(int i1, int i2);
+extern FUNCAPI int Divint(int i1, int i2);
+extern FUNCAPI int Squarint(int i);
+extern FUNCAPI double Adddbl(double i1, double i2);
+extern FUNCAPI double Subdbl(double i1, double i2);
+extern FUNCAPI double Multdbl(double i1, double i2);
+extern FUNCAPI double Divdbl(double i1, double i2);
+extern FUNCAPI double Squardbl(double i2);
+
+#endif // header guard
+//*********************    					End file : dll_share.h     							*****************
+
+"dlltest_implicit.c" :
+
+//*******************   File : testdll_implicit.c (main test of dll with load implicit)    *****************
+#include <stdio.h> 			//   Needed for printf function
+#include <windows.h> 		// 	 Not needed !!! Strange, where are declared motifs to declare or call functions of DLL __declspec( dllexport ) or __declspec( dllimport ) ?
+#include "dll_share.h"
+
+int main(int argc, char** argv)
+{
+  int a = 42;
+  int b = 7;
+  int result = 0;
+  double a1 = 16.9;
+  double b1 = 7.3;
+  double result1 = 0.0;
+  
+  Hello();
+  printf("----------------------         Lancement des operations arithmetiques avec des entiers            -------------------\n");
+  result = Addint(a, b);
+  printf("Le resultat de l'addition de %i plus %i vaut : %i \t (from application with implicit load of DLL %s)\n", a, b, result, argv[0]);
+  result = Subint(a, b);
+  printf("Le resultat de la soustraction de %i moins %i vaut : %i   (from application with implicit load of DLL %s)\n", a, b, result, argv[0]);
+  result = Multint(a, b);
+  printf("Le resultat de la multiplication de %i par %i vaut : %i  (from application with implicit load of DLL %s)\n", a, b, result, argv[0]);
+  result = Divint(a, b);
+  printf("Le resultat de la division de %i par %i vaut : %i.         (from application with implicit load of DLL %s)\n", a,b,result,argv[0]);
+  result = Squarint(b);
+  printf("Le carre de %i par %i vaut : %i. \t\t\t\t (from application with implicit load of DLL %s)\n", b,b,result,argv[0]);
+  printf("----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------\n");
+  result1 = Adddbl(a1, b1);
+  printf("La somme de %.1f plus %.1f vaut %.2f. \t       (from application with implicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+  result1 = Subdbl(a1, b1);
+  printf("La soustraction de %.1f moins %.1f vaut %.2f.   (from application with implicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+  result1 = Multdbl(a1, b1);
+  printf("La multiplication de %.1f par %.1f vaut %.2f. (from application with implicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+  result1 = Divdbl(a1, b1);
+  printf("La division de %.1f par %.1f vaut %.5f.        (from application with implicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+  result1 = Squardbl(b1);
+  printf("Le carre de %.1f par %.1f vaut %.2f. \t       (from application with implicit load of DLL %s)\n", b1,b1,result1,argv[0]);	
+  
+  return( 0 );
+}
+//******************************      End file : testdll_implicit.c        *********************************
+
+"testdll_explicit.c" :
+
+//*********************  File : testdll_explicit.c (program main test of dll, with load explicit)  *****************
+#include <stdio.h>
+#include <windows.h>
+// #include "dll_share.h"
+
+
+typedef int (*HelloFunc)();
+typedef int (*AddFuncint)(int,int);
+typedef int (*SubFuncint)(int,int);
+typedef int (*MulFuncint)(int,int);
+typedef int (*DivFuncint)(int,int);
+typedef int (*SquarFuncint)(int);
+typedef double (*AddFuncdbl)(double,double);
+typedef double (*SubFuncdbl)(double,double);
+typedef double (*MulFuncdbl)(double,double);
+typedef double (*DivFuncdbl)(double,double);
+typedef double (*SquarFuncdbl)(double);
+
+
+int main( int argc, char *argv[ ] )
+{
+	int a = 42;
+	int b = 7;
+	int result=0;
+	double a1 = 16.9;
+	double b1 = 7.3;
+	double result1 = 0.0;
+
+#if defined(__OW64__)	
+	HINSTANCE hLib = LoadLibrary("dll_core64.dll");
+#else
+	HINSTANCE hLib = LoadLibrary("dll_core.dll");	
+#endif
+
+	
+	if (hLib != NULL) {
+
+		HelloFunc af0 = (HelloFunc)GetProcAddress(hLib, "Hello");	
+		AddFuncint af1 = (AddFuncint)GetProcAddress(hLib, "Addint");
+		SubFuncint af2 = (SubFuncint)GetProcAddress(hLib, "Subint");	
+		MulFuncint af3 = (MulFuncint)GetProcAddress(hLib, "Multint");
+		DivFuncint af4 = (DivFuncint)GetProcAddress(hLib, "Divint");
+		SquarFuncint af5 = (SquarFuncint)GetProcAddress(hLib, "Squarint");
+		AddFuncdbl af6 = (AddFuncdbl)GetProcAddress(hLib, "Adddbl");
+		SubFuncdbl af7 = (SubFuncdbl)GetProcAddress(hLib, "Subdbl");	
+		MulFuncdbl af8 = (MulFuncdbl)GetProcAddress(hLib, "Multdbl");
+		DivFuncdbl af9 = (DivFuncdbl)GetProcAddress(hLib, "Divdbl");
+		SquarFuncdbl af10 = (SquarFuncdbl)GetProcAddress(hLib, "Squardbl");
+	
+		(*af0)();
+		printf("----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------\n");		
+		result = (*af1)(a, b);
+		printf("La somme de %i plus %i vaut %i. \t\t(from application with explicit load of DLL %s)\n", a,b,result,argv[0]);
+		result = (*af2)(a, b);
+		printf("La soustraction de %i moins %i vaut %i.  (from application with explicit load of DLL %s)\n", a,b,result,argv[0]);
+		result = (*af3)(a, b);
+		printf("La multiplication de %i par %i vaut %i. (from application with explicit load of DLL %s)\n", a,b,result,argv[0]);
+		result = (*af4)(a, b);
+		printf("La division de %i par %i vaut %i.         (from application with explicit load of DLL %s)\n", a,b,result,argv[0]);
+		result = (*af5)(b);
+		printf("Le carre de %i par %i vaut %i.\t\t(from application with explicit load of DLL %s)\n", b,b,result,argv[0]);
+		printf("----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------\n");	
+		result1 = (*af6)(a1, b1);
+		printf("La somme de %.1f plus %.1f vaut %.2f. \t       (from application with explicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+		result1 = (*af7)(a1, b1);
+		printf("La soustraction de %.1f moins %.1f vaut %.2f.   (from application with explicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+		result1 = (*af8)(a1, b1);
+		printf("La multiplication de %.1f par %.1f vaut %.2f. (from application with explicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+		result1 = (*af9)(a1, b1);
+		printf("La division de %.1f par %.1f vaut %.5f.        (from application with explicit load of DLL %s)\n", a1,b1,result1,argv[0]);
+		result1 = (*af10)(b1);
+		printf("Le carre de %.1f par %.1f vaut %.2f. \t       (from application with explicit load of DLL %s)\n", b1,b1,result1,argv[0]);	
+		
+		FreeLibrary(hLib);
+		
+	} else { 
+#if defined(__OW64__)	
+		printf("Unable to load the specified DLL : dll_core64.dll.");
+#else	
+		printf("Unable to load the specified DLL : dll_core.dll.");
+#endif
+	}
+	
+	return EXIT_SUCCESS;
+}
+// ****************************************     End file : testdll_explicit.c    *************************************************
+
+"dll_core.lbc" (fichier de définition des exports des DLL utilisé pour générer les alias de fonctions sans "_" au début)
+
+++'_Hello'.'dll_core.dll'.'Hello'.'_Hello'
+++'_Addint'.'dll_core.dll'.'Addint'.'_Addint'
+++'_Subint'.'dll_core.dll'.'Subint'.'_Subint'
+++'_Multint'.'dll_core.dll'.'Multint'.'_Multint'
+++'_Divint'.'dll_core.dll'.'Divint'.'_Divint'
+++'_Squarint'.'dll_core.dll'.'Squarint'.'_Squarint'
+++'_Adddbl'.'dll_core.dll'.'Adddbl'.'_Adddbl'
+++'_Subdbl'.'dll_core.dll'.'Subdbl'.'_Subdbl'
+++'_Multdbl'.'dll_core.dll'.'Multdbl'.'_Multdbl'
+++'_Divdbl'.'dll_core.dll'.'Divdbl'.'_Divdbl'
+++'_Squardbl'.'dll_core.lib'.'Squardbl'.'_Squardbl'
+ 
+Le même en version 64 bits (il faut juste changer le nom de la DLL) : "dll_core64.lbc" (cela ne vous rapelle rien ?) :
+
+++'_Hello'.'dll_core64.dll'.'Hello'.'_Hello'
+++'_Addint'.'dll_core64.dll'.'Addint'.'_Addint'
+++'_Subint'.'dll_core64.dll'.'Subint'.'_Subint'
+++'_Multint'.'dll_core64.dll'.'Multint'.'_Multint'
+++'_Divint'.'dll_core64.dll'.'Divint'.'_Divint'
+++'_Squarint'.'dll_core64.dll'.'Squarint'.'_Squarint'
+++'_Adddbl'.'dll_core64.dll'.'Adddbl'.'_Adddbl'
+++'_Subdbl'.'dll_core64.dll'.'Subdbl'.'_Subdbl'
+++'_Multdbl'.'dll_core64.dll'.'Multdbl'.'_Multdbl'
+++'_Divdbl'.'dll_core64.dll'.'Divdbl'.'_Divdbl'
+++'_Squardbl'.'dll_core64.lib'.'Squardbl'.'_Squardbl'
+
+NB : On parle ici de préfixe, car le mode d'appel "__cdecl" génère ce préfixage, alors que le mode d'appel "__watcall"
+(Watcom call) utilisé par défaut avec ce compilateur lui génère un suffixage par "_". Et je ne parle pas du mode
+d'appel "__stdcall" qui lui génère un suffixage par "@nn" suivi parfois par un n° d'ordre, avec "nn" équivalent au
+nombre d'octets occupés en mémoire par les paramètres de la fonction appelée (pourquoi faire simple ... ).
+ 
+Le script qui sert à la génération de la DLL, comme des deux programmes de tests, et enfin du test avec le script python,
+qui impose le mode d'appel "__cdecl" à chaque instruction de compilation utilisée (paramètre "-ecc") :
+
+"compile_link_dll_OW_OK.bat" :
+
+@echo off
+REM
+REM   	Script de génération de la DLL dll_core.dll et des programmee de test : "testdll_implicit.exe" (chargement implicite de la DLL),
+REM 	"testdll_explicit.exe" (chargement explicite de la DLL), et enfin du script de test écrit en python.
+REM		Ce fichier de commande est paramètrable avec deux paraamètres : 
+REM			a) le premier paramètre permet de choisir la compilation et le linkage des programmes en une seule passe
+REM 			soit la compilation et le linkage en deux passes successives : compilation séparée puis linkage,
+REM 		b) le deuxième paramètre définit soit une compilation et un linkage en mode 32 bits, soit en mode 64 bits
+REM 	 		pour les compilateurs qui le supportent.
+REM     Le premier paramètre peut prendre les valeurs suivantes :
+REM 		ONE (or unknown value, because only second value of this parameter is tested during execution) ou TWO.
+REM     Et le deuxième paramètre peut prendre les valeurs suivantes :
+REM 		32, 64 ou  ALL si vous souhaitez lancer les deux générations, 32 bits et 64 bits.
+REM
+REM 	Author : 						Thierry DECHAIZE
+REM		Date creation/modification : 	07/12/2023
+REM 	Reason of modifications : 	n° 1 - wcl386 don't work first time, because I omit option "-l=nt_dll", just option "-bd" positioned. 
+REM 										I think it's suffisant, but not !!! OKAY, OKAY, shame on me !!!
+REM 	 							n° 2 - En enlevant l'option "impfile=dll_core[64].def" lors de l'édition des liens, je m'aperçois que 
+REM 										la librairie statique est correctement générée. Youpie ! Je supprime la constitution de cette
+REM 										librarie sous forme explicite et la remet dans l'edition des liens de la DLL. Bug ?
+REM 	 							n° 3 - Add "-ecc" for all generations to test dll with python's script successfully, same with "int" operations. 
+REM 										Generalization of "__cdecl" call, because default call ("__watcall") is not understand by extern tool like python script.
+REM 										Last question in wait : why call of python script is successfull on "double" operations, same with "__watcall" generation ?
+REM 	Version number :				1.1.3	          	(version majeure . version mineure . patch level)
+
+echo. Lancement du batch de generation d'une DLL et deux tests de celle-ci avec Open Watcom 32 bits ou 64 bits
+REM     Affichage du nom du système d'exploitation Windows :              	Microsoft Windows 11 Famille ... (par exemple)
+REM 	Affichage de la version du système Windows :              			10.0.22621 (par exemple)
+REM 	Affichage de l'architecture du système Windows : 					64-bit (par exemple)
+echo. *********  Quelques caracteristiques du systeme hebergeant l'environnement de developpement.   ***********
+WMIC OS GET Name
+WMIC OS GET Version
+WMIC OS GET OSArchitecture
+
+REM 	Save of initial PATH on PATHINIT variable
+set PATHINIT=%PATH%
+echo. **********      Pour cette generation le premier parametre vaut "%1" et le deuxieme "%2".     ************* 
+IF "%2" == "32" ( 
+   call :complink32 %1
+) ELSE (
+   IF "%2" == "64" (
+      call :complink64 %1
+   ) ELSE (
+      call :complink32 %1
+	  call :complink64 %1
+	)  
+)
+
+goto FIN
+
+:complink32
+echo. ******************            Compilation de la DLL en mode 32 bits        *******************
+REM      Mandatory, add to PATH the binary directory of compiler OW 32 bits. You can adapt this directory at your personal software environment.
+set PATH=C:\WATCOM\binnt;%PATH%
+set "PAR1=%~1"
+if PAR1 == "TWO" (
+REM     Options used by Open Watcom compiler 32 bits
+REM 		-q       					Set to quiet mode
+REM 		-bd       					Set option to build DLL 
+REM 		-d0 						No debugging information
+REM 		-ecc						Set calling conv. to __cdecl (Mandatory, if you want test DLL with Python !!! If not, default is __watcall, and Python don't call "int" operations)
+REM 		-v 							Option to generate def file (like "option impfile=dll_core.def" ?!?!? but without suppression of generation of lib file)
+REM 		-dxxxxx	 					Define variable xxxxxx used by precompiler
+REM 		-ixxxxxx					Define search path to include file
+REM 		-fo=xxxxx 					Define output file generated by Open Watcom compiler, here obj file
+wcc386 -q -bd -d0 -ecc -v -dNDEBUG -dBUILD_DLL -d_WIN32 src\dll_core.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fo=dll_core.obj
+echo. ************     				 Dump des symboles exportes avec l option -v    				          *************
+type dll_core.def
+echo. *****************           Edition des liens .ie. linkage de la DLL.        ***************
+REM     Options used by linker of lcc compiler
+REM 		system nt_dll     			Define output to be an Windows [NT] DLL 
+REM 		initinstance terminstance   Mandatory to calle the entry point of DLL, here LibMain. It's a continued parameters after "system nnnn". 
+REM 		run win 					Define subsystem to windows (either to generate GUI exe file or dll file)
+REM 		name xxxxxx 				Define output file generated by Open Watcom linker, here dll file.
+REM 		file xxxxxx					Define input file of Open Watcom linker
+REM 		option						Mandatory to add optionnal instructions to linker
+REM 			implib=xxxxxx				Instruct linker to generate lib file in parallel of DLL 
+REM 			quiet						Set to quiet mode
+wlink system nt_dll initinstance terminstance run win  EXPORT=src\dll_core.lbc LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 option implib=dll_core.lib option quiet name dll_core.dll file dll_core.obj
+REM 	Not mandatory here, wlink can generate lib file with option implib=dll_core.lib, but without another option impfile=dll_core.def on same line ???? 
+REM wlib -q -n dll_core.lib +dll_core.dll
+REM 	Options used by tool "wdump" of Open Watcom compiler
+REM 		-i				Show list of exported symbols from a library/exe/obj/dll
+echo. ************     				 Dump des sysboles exportes de la DLL dll_core.dll      				  *************
+wdump -i dll_core.dll
+echo. ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+wcc386 -q -bc -bt=nt -ecc -d0 -dNDEBUG -d_WIN32 src\testdll_implicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fo=testdll_implicit.obj
+REM 	Options used by linker of Open Watcom compiler
+REM 		-subsystem console 	Define subsystem to console, because generation of console application 
+wlink option quiet system nt run console LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 name testdll_implicit.exe file testdll_implicit.obj lib dll_core.lib
+REM 	Run test program of DLL with implicit load
+testdll_implicit.exe
+echo. ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+wcc386 -q -bc -bt=nt -d0 -ecc -dNDEBUG -d_WIN32 src\testdll_explicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fo=testdll_explicit.obj
+wlink option quiet system nt run console LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 name testdll_explicit.exe file testdll_explicit.obj lib dll_core.lib
+REM 	Run test program of DLL with explicit load
+testdll_explicit.exe					
+ ) ELSE (
+REM     Options used by Open Watcom compiler 32 bits
+REM 		-q       					Set to quiet mode
+REM 		-bd       					Set option to build DLL (used by compiler, only ?)
+REM 		-l=nt_dll       			Set option to build DLL (used by linker)   (Needed here, "-bd" isn't enougth, MANDATORY)
+REM										To be sure, suppress options "-q" and -"option quiet", and see the last message of linker : "creating a Windows NT dynamic link library" 
+REM 		-d0 						No debugging information
+REM 		-v 							Option to generate def file (like "option impfile=dll_core.def" ?!?!? but without suppression of generation of lib file)
+REM 		-ecc						Set calling conv. to __cdecl (Mandatory, if you want test DLL with Python !!! If not, default is __watcall, and Python don't call "int" operations)
+REM 		-dxxxxx	 					Define variable xxxxxx used by precompiler
+REM 		-ixxxxxx					Define search path to include file
+REM 		-fe=xxxxx 					Define output file generated by Open Watcom compiler, here dll file
+REM 		-"xxxxxxxxxxxxxxxx" 		-"xxx" Define options transmit to linker : mandatory to add optionnal instructions to linker
+REM 			LIBP pathlib1;pathlib2		Define librairies paths used by linker
+REM 			EXPORT=filename.lbc			Instruct linker to add "alias" of function défined into dll, here file lbc is src\dll_core.lbc 
+REM 			option impl=xxxxxx			Instruct linker to generate lib file in parallel of DLL
+REM 			option quiet				Set to quiet mode
+wcl386 -q -bd -l=nt_dll -d0 -v -ecc -dNDEBUG -dBUILD_DLL -d_WIN32 -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fe=dll_core.dll -"LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386" -"EXPORT=src\dll_core.lbc" -"option impl=dll_core.lib" -"option quiet" src\dll_core.c 
+echo. ************     				 Dump des symboles exportes avec l option -v    				          *************
+type dll_core.def
+REM 	Not mandatory here, wlink can generate lib file with option implib=dll_core.lib, but without another option impfile=dll_core.def on same line ???? bug ?
+REM wlib -q -n dll_core.lib +dll_core.dll
+REM 	Options used by tool "wdump" of Open Watcom compiler
+REM 		-i				Show list of exported symbols from a library/exe/obj/dll
+echo. ************     				 Dump des sysboles exportes de la DLL dll_core.dll      				  *************
+wdump -i dll_core.dll
+echo. ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+wcl386 -q -l=nt -d0 -bt=nt -ecc -dNDEBUG -d_WIN32 src\testdll_implicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fe=testdll_implicit.exe -"LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386" -"option quiet" -"lib dll_core.lib"
+REM 	Run test program of DLL with implicit load
+testdll_implicit.exe
+echo. ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+wcl386 -q -l=nt -d0 -ecc -dNDEBUG -d_WIN32 src\testdll_explicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fe=testdll_explicit.exe -"LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386" -"option quiet"
+REM 	Run test program of DLL with explicit load
+testdll_explicit.exe
+)
+echo. ****************               Lancement du script python 32 bits de test de la DLL.               ********************
+%PYTHON32% version.py
+REM 	Run test python script of DLL with explicit load
+%PYTHON32% testdll_cdecl.py dll_core.dll 
+REM 	Return in initial PATH
+set PATH=%PATHINIT%
+exit /B 
+
+:complink64
+echo. ******************          Compilation de la DLL en mode 64 bits        *******************
+REM      Mandatory, add to PATH the binary directory of compiler OW 64 bits. You can adapt this directory at your personal software environment.
+set PATH=C:\WATCOM\binnt64;%PATH%
+set "PAR1=%~1"
+if PAR1 == "TWO" (
+REM     Options used by Open Watcom compiler 64 bits
+REM 		-q       					Set to quiet mode
+REM 		-bd       					Set option to build DLL 
+REM 		-d0 						No debugging information
+REM 		-ecc						Set calling conv. to __cdecl (Mandatory, if you want test DLL with Python !!! If not, default is __watcall, and Python don't call "int" operations)
+REM 		-v 							Option to generate def file (like "option impfile=dll_core.def" ?!?!? but without suppression of generation of lib file)
+REM 		-dxxxxx	 					Define variable xxxxxx used by precompiler
+REM 		-ixxxxxx					Define search path to include file
+REM 		-fo=xxxxx 					Define output file generated by Open Watcom compiler, here obj file
+wcc386 -q -bd -d0 -ecc -v -dNDEBUG -dBUILD_DLL -d_WIN32 src\dll_core.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fo=dll_core64.obj
+echo. ************     				 Dump des symboles exportes avec l option -v    				          *************
+type dll_core64.def
+echo. *****************           Edition des liens .ie. linkage de la DLL.        ***************
+REM     Options used by linker of lcc compiler
+REM 		system nt_dll     			Define output to be an Windows [NT] DLL 
+REM 		initinstance terminstance   Mandatory to calle the entry point of DLL, here LibMain. It's a continued parameters after "system nnnn". 
+REM 		run win 					Define subsystem to windows (either to generate GUI exe file or dll file)
+REM 		name xxxxxx 				Define output file generated by Open Watcom linker, here dll file.
+REM 		file xxxxxx					Define input file of Open Watcom linker
+REM 		option						Mandatory to add optionnal instructions to linker
+REM 			implib=xxxxxx				Instruct linker to generate lib file in parallel of DLL 
+REM 			quiet						Set to quiet mode
+wlink system nt_dll initinstance terminstance run win EXPORT=src\dll_core64.lbc LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 option implib=dll_core64.lib option quiet name dll_core64.dll file dll_core64.obj
+REM 	Not mandatory here, wlink can generate lib file with option implib=dll_core64.lib, but without another option impfile=dll_core64.def on same line ???? 
+REM wlib -q -n dll_core64.lib +dll_core64.dll
+REM 	Options used by tool "wdump" of Open Watcom compiler
+REM 		-i				Show list of exported symbols from a library/exe/obj/dll
+echo. ************     				 Dump des symboles exportes de la DLL dll_core64.dll      				  *************
+wdump -i dll_core64.dll
+echo. ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+wcc386 -q -bc -bt=nt -d0 -ecc -dNDEBUG -d_WIN32 src\testdll_implicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fo=testdll_implicit64.obj
+REM 	Options used by linker of Open Watcom compiler
+REM 		-subsystem console 	Define subsystem to console, because generation of console application 
+wlink option quiet system nt run console LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 name testdll_implicit64.exe file testdll_implicit64.obj lib dll_core64.lib
+REM 	Run test program of DLL with implicit load
+testdll64_implicit64.exe
+echo. ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+wcc386 -q -bc -bt=nt -d0 -ecc -dNDEBUG -d_WIN32 -d__OW64__ src\testdll_explicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fo=testdll_explicit64.obj
+wlink option quiet system nt run console LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 name testdll_explicit64.exe file testdll_explicit64.obj lib dll_core64.lib
+REM 	Run test program of DLL with explicit load
+testdll64_explicit.exe					
+ ) ELSE (
+REM     Options used by Open Watcom compiler 32 bits
+REM 		-q       					Set to quiet mode
+REM 		-bd       					Set option to build DLL (used by compiler, only ?)
+REM 		-l=nt_dll       			Set option to build DLL (used by linker)   (Needed here, "-bd" isn't enougth, MANDATORY)
+REM										To be sure, suppress options "-q" and -"option quiet", and see the last message of linker : "creating a Windows NT dynamic link library" 
+REM 		-d0 						No debugging information
+REM 		-v 							Option to generate def file (like "option impfile=dll_core64.def" ?!?!? but without suppression of generation of lib file)
+REM 		-ecc						Set calling conv. to __cdecl (Mandatory, if you want test DLL with Python !!! If not, default is __watcall, and Python don't call "int" operations)
+REM 		-dxxxxx	 					Define variable xxxxxx used by precompiler
+REM 		-ixxxxxx					Define search path to include file
+REM 		-fe=xxxxx 					Define output file generated by Open Watcom compiler, here dll file
+REM 		-"xxxxxxxxxxxxxxxx" 		Define options transmit to linker : mandatory to add optionnal instructions to linker
+REM 			LIBP pathlib1;pathlib2		Define librairies paths used by linker
+REM 			EXPORT=filename.lbc			Instruct linker to add "alias" of function défined into dll, here file lbc is src\dll_core64.lbc 
+REM 			option implib=xxxxxx		Instruct linker to generate lib file in parallel of DLL
+REM 			option quiet				Set to quiet mode
+wcl386 -q -bd -l=nt_dll -d0 -v -ecc -dNDEBUG -dBUILD_DLL -d_WIN32 -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fe=dll_core64.dll -"LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386" -"EXPORT=src\dll_core64.lbc" -"option implib=dll_core64.lib" -"option quiet" src\dll_core.c 
+echo. ************     				 Dump des symboles exportes avec l option -v    				          *************
+type dll_core64.def
+REM 	Not mandatory here, wlink can generate lib file with option implib=dll_core64.lib, but without another option impfile=dll_core64.def on same line ???? Bug ?
+REM wlib -q -n dll_core64.lib +dll_core64.dll
+REM 	Options used by tool "wdump" of Open Watcom compiler
+REM 		-i				Show list of exported symbols from a library/exe/obj/dll
+echo. ************     				 Dump des symboles exportes de la DLL dll_core64.dll      				  *************
+wdump -i dll_core64.dll
+echo. ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+wcl386 -q -l=nt -d0 -bt=nt -ecc -dNDEBUG -d_WIN32 src\testdll_implicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fe=testdll_implicit64.exe -"LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386" -"option quiet" -"lib dll_core64.lib"
+REM 	Run test program of DLL with implicit load
+testdll_implicit64.exe
+echo. ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+wcl386 -q -l=nt -d0 -ecc -dNDEBUG -d_WIN32 -d__OW64__ src\testdll_explicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fe=testdll_explicit64.exe -"LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386" -"option quiet"
+REM 	Run test program of DLL with explicit load
+testdll_explicit64.exe
+)					
+echo. *************   Lancement du script python 32 bits de test de la DLL (surprising! only 32 bits run)    ***************
+%PYTHON32% version.py
+REM 	Run test python script of DLL with explicit load
+%PYTHON32% testdll_cdecl.py dll_core64.dll 
+REM 	Return in initial PATH
+set PATH=%PATHINIT%
+exit /B 
+
+:FIN
+echo.        Fin de la generation de la DLL et des tests avec Open Watcom 32 bits ou 64 bits.
+
+Le script python de test est le suivant :
+
+"testdll_cdecl.py" :
+
+# **************************************     File : testdll_cdecl.py     ******************************
+#testdll_cdecl.py
+import ctypes, ctypes.util
+import os
+import sys
+
+if len( sys.argv ) == 1:
+    print( "testdll_cdecl.py script wrote by Thierry DECHAIZE, thierry.dechaize@gmail.com" )
+    print( "\tusage: python test_add_cdecl.py Name_of_Dll." )
+    exit()
+
+cwd = os.getcwd()
+dll_name = cwd + '\\' + sys.argv[1]
+mydll_path = ctypes.util.find_library(dll_name)
+if not mydll_path:
+    print("Unable to find the specified DLL.")
+    sys.exit()
+  
+#mydll = ctypes.WinDLL(dll_name)          # load the dll __stdcall  
+try:    
+    mydll = ctypes.CDLL(dll_name)      # load the dll __cdecl
+except OSError:
+    print(f"Unable to load the specified DLL : {sys.argv[1]}.")
+    sys.exit()
+    
+# test mandatory in case of Borland generation, the export function is decorated by "_" prefix  => call _Add
+if 'BC55' in sys.argv[1]  or 'PELLESC64' in sys.argv[1] or 'OW32' in sys.argv[1]: 
+#   mydll._Hello(None)
+    print(f"----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------");
+    mydll._Addint.argtypes = [ctypes.c_int, ctypes.c_int]
+    print(f"La somme de 42 plus 7 vaut {mydll._Addint(42, 7)}. (from script python {sys.argv[0]})")
+    mydll._Subint.argtypes = [ctypes.c_int, ctypes.c_int]
+    print(f"La difference de 42 moins 7 vaut {mydll._Subint(42, 7)}. (from script python {sys.argv[0]})")
+    mydll._Multint.argtypes = [ctypes.c_int, ctypes.c_int]
+    print(f"La multiplication de 42 par 7 vaut {mydll._Multint(42, 7)}. (from script python {sys.argv[0]})")
+    mydll.Squareint.argtypes = [ctypes.c_int]
+    print(f"Le carre de 7 par 7 vaut {mydll._Squarint(7)}. (from script python {sys.argv[0]})")
+    print(f"----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------");
+    mydll._Adddbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll._Adddbl.restype = ctypes.c_double
+    print(f"La somme de 16.9 plus 7.3 vaut {mydll._Adddbl(16.9, 7.3)}. (from script python {sys.argv[0]})")
+    mydll._Subdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll._Subdbl.restype = ctypes.c_double
+    print(f"La difference de 16.9 moins 7.3 vaut {mydll._Subdbl(16.9, 7.3)}. (from script python {sys.argv[0]})")
+    mydll._Multdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll._Multdbl.restype = ctypes.c_double
+    print(f"La multiplication de 16.9 par 7.3 vaut {mydll._Multdbl(16.9, 7.3)}. (from script python {sys.argv[0]})")
+    mydll._Squardbl.argtypes = [ctypes.c_double]
+    mydll._Squardbl.restype = ctypes.c_double
+    print(f"Le carre de 7.3 par 7.3 vaut {mydll._Squardbl(7.3)}. (from script python {sys.argv[0]})")
+else:
+    mydll.Hello(None)
+    print(f"----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------");
+    mydll.Addint.argtypes = [ctypes.c_int, ctypes.c_int]
+    mydll.Addint.restype = ctypes.c_int
+    print(f"La somme de 42 plus 7 vaut {mydll.Addint(42,7)}.                  (from script python {sys.argv[0]})")
+    mydll.Subint.argtypes = [ctypes.c_int, ctypes.c_int]
+    mydll.Subint.restype = ctypes.c_int
+    print(f"La difference de 42 moins 7 vaut {mydll.Subint(42,7)}.            (from script python {sys.argv[0]})")
+    mydll.Multint.argtypes = [ctypes.c_int, ctypes.c_int]
+    mydll.Multint.restype = ctypes.c_int
+    print(f"La multiplication de 42 par 7 vaut {mydll.Multint(42,7)}.         (from script python {sys.argv[0]})")
+    mydll.Divint.argtypes = [ctypes.c_int, ctypes.c_int]
+    mydll.Divint.restype = ctypes.c_int
+    print(f"La division de 42 par 7 vaut {mydll.Divint(42,7)}.                 (from script python {sys.argv[0]})")
+    mydll.Squarint.argtypes = [ctypes.c_int]
+    mydll.Squarint.restype = ctypes.c_int
+    print(f"Le carre de 7 par 7 vaut {mydll.Squarint(7)}.                    (from script python {sys.argv[0]})")
+    print(f"----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------");
+    mydll.Adddbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll.Adddbl.restype = ctypes.c_double
+    print(f"La somme de 16.9 plus 7.3 vaut {mydll.Adddbl(16.9, 7.3)}.                  (from script python {sys.argv[0]})")
+    mydll.Subdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll.Subdbl.restype = ctypes.c_double
+    print(f"La difference de 16.9 moins 7.3 vaut {"{0:g}".format(mydll.Subdbl(16.9, 7.3))}.             (from script python {sys.argv[0]})")
+    mydll.Multdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll.Multdbl.restype = ctypes.c_double
+    print(f"La multiplication de 16.9 par 7.3 vaut {"{0:g}".format(mydll.Multdbl(16.9, 7.3))}.        (from script python {sys.argv[0]})")
+    mydll.Divdbl.argtypes = [ctypes.c_double, ctypes.c_double]
+    mydll.Divdbl.restype = ctypes.c_double
+    print(f"La division de 16.9 par 7.3 vaut {"{0:g}".format(mydll.Divdbl(16.9, 7.3))}.             (from script python {sys.argv[0]})")
+    mydll.Squardbl.argtypes = [ctypes.c_double]
+    mydll.Squardbl.restype = ctypes.c_double
+    print(f"Le carre de 7.3 par 7.3 vaut {"{0:g}".format(mydll.Squardbl(7.3))}.                   (from script python {sys.argv[0]})")
+# **************************************      End file : testdll_cdecl.py      ******************************
+
+Et enfin, voici les résultats obtenus avec le choix de genération en une passe (32 bits puis 64 bits) :
+
+"compile_link_dll_OW_OK.bat ONE ALL"
+ Lancement du batch de generation d'une DLL et deux tests de celle-ci avec Open Watcom 32 bits ou 64 bits
+ *********  Quelques caracteristiques du systeme hebergeant l'environnement de developpement.   ***********
+Name
+Microsoft Windows 11 Famille|C:\WINDOWS|\Device\Harddisk1\Partition3
+
+Version
+10.0.22631
+
+OSArchitecture
+64-bit
+
+ **********      Pour cette generation le premier parametre vaut "ONE" et le deuxieme "ALL".     *************
+ ******************            Compilation de la DLL en mode 32 bits        *******************
+ ************                                    Dump des symboles exportes avec l option -v                                              *************
+        1 fichier(s) copié(s).
+//#line "src\dll_core.c" 7
+extern int __stdcall LibMain(void *hinstDll,unsigned long hinstDll,void *hinstDll);
+//#line "src\dll_core.c" 42
+extern int __export Hello(void );
+//#line "src\dll_core.c" 48
+extern int __export Addint(int i1,int i1);
+//#line "src\dll_core.c" 53
+extern int __export Subint(int i1,int i1);
+//#line "src\dll_core.c" 58
+extern int __export Multint(int i1,int i1);
+//#line "src\dll_core.c" 63
+extern int __export Divint(int i1,int i1);
+//#line "src\dll_core.c" 73
+extern int __export Squarint(int i);
+//#line "src\dll_core.c" 78
+extern double __export Adddbl(double i1,double i1);
+//#line "src\dll_core.c" 83
+extern double __export Subdbl(double i1,double i1);
+//#line "src\dll_core.c" 88
+extern double __export Multdbl(double i1,double i1);
+//#line "src\dll_core.c" 93
+extern double __export Divdbl(double i1,double i1);
+//#line "src\dll_core.c" 103
+extern double __export Squardbl(double i);
+ ************                                    Dump des sysboles exportes de la DLL dll_core.dll                                        *************
+
+Adddbl.'DLL_CORE.DLL'.7
+Addint.'DLL_CORE.DLL'.2
+Divdbl.'DLL_CORE.DLL'.10
+Divint.'DLL_CORE.DLL'.5
+Hello.'DLL_CORE.DLL'.1
+Multdbl.'DLL_CORE.DLL'.9
+Multint.'DLL_CORE.DLL'.4
+Squardbl.'DLL_CORE.DLL'.11
+Squarint.'DLL_CORE.DLL'.6
+Subdbl.'DLL_CORE.DLL'.8
+Subint.'DLL_CORE.DLL'.3
+_Adddbl.'DLL_CORE.DLL'.18
+_Addint.'DLL_CORE.DLL'.13
+_Divdbl.'DLL_CORE.DLL'.21
+_Divint.'DLL_CORE.DLL'.16
+_Hello.'DLL_CORE.DLL'.12
+_Multdbl.'DLL_CORE.DLL'.20
+_Multint.'DLL_CORE.DLL'.15
+_Squardbl.'DLL_CORE.DLL'.22
+_Squarint.'DLL_CORE.DLL'.17
+_Subdbl.'DLL_CORE.DLL'.19
+_Subint.'DLL_CORE.DLL'.14
+ ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------         Lancement des operations arithmetiques avec des entiers            -------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294  (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+La division de 16.9 par 7.3 vaut 2.31507.      (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+DLL detaching from process...
+ ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La division de 16.9 par 7.3 vaut 2.31507.      (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+DLL detaching from process...
+ ****************               Lancement du script python 32 bits de test de la DLL.               ********************
+Version python : 3.12 32bit
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+ ******************          Compilation de la DLL en mode 64 bits        *******************
+ ************                                    Dump des symboles exportes avec l option -v                                              *************
+        1 fichier(s) copié(s).
+//#line "src\dll_core.c" 7
+extern int __stdcall LibMain(void *hinstDll,unsigned long hinstDll,void *hinstDll);
+//#line "src\dll_core.c" 42
+extern int __export Hello(void );
+//#line "src\dll_core.c" 48
+extern int __export Addint(int i1,int i1);
+//#line "src\dll_core.c" 53
+extern int __export Subint(int i1,int i1);
+//#line "src\dll_core.c" 58
+extern int __export Multint(int i1,int i1);
+//#line "src\dll_core.c" 63
+extern int __export Divint(int i1,int i1);
+//#line "src\dll_core.c" 73
+extern int __export Squarint(int i);
+//#line "src\dll_core.c" 78
+extern double __export Adddbl(double i1,double i1);
+//#line "src\dll_core.c" 83
+extern double __export Subdbl(double i1,double i1);
+//#line "src\dll_core.c" 88
+extern double __export Multdbl(double i1,double i1);
+//#line "src\dll_core.c" 93
+extern double __export Divdbl(double i1,double i1);
+//#line "src\dll_core.c" 103
+extern double __export Squardbl(double i);
+ ************                                    Dump des symboles exportes de la DLL dll_core64.dll                                      *************
+
+Adddbl.'DLL_CORE64.DLL'.7
+Addint.'DLL_CORE64.DLL'.2
+Divdbl.'DLL_CORE64.DLL'.10
+Divint.'DLL_CORE64.DLL'.5
+Hello.'DLL_CORE64.DLL'.1
+Multdbl.'DLL_CORE64.DLL'.9
+Multint.'DLL_CORE64.DLL'.4
+Squardbl.'DLL_CORE64.DLL'.11
+Squarint.'DLL_CORE64.DLL'.6
+Subdbl.'DLL_CORE64.DLL'.8
+Subint.'DLL_CORE64.DLL'.3
+_Adddbl.'DLL_CORE64.DLL'.18
+_Addint.'DLL_CORE64.DLL'.13
+_Divdbl.'DLL_CORE64.DLL'.21
+_Divint.'DLL_CORE64.DLL'.16
+_Hello.'DLL_CORE64.DLL'.12
+_Multdbl.'DLL_CORE64.DLL'.20
+_Multint.'DLL_CORE64.DLL'.15
+_Squardbl.'DLL_CORE64.DLL'.22
+_Squarint.'DLL_CORE64.DLL'.17
+_Subdbl.'DLL_CORE64.DLL'.19
+_Subint.'DLL_CORE64.DLL'.14
+ ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------         Lancement des operations arithmetiques avec des entiers            -------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294  (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+La division de 16.9 par 7.3 vaut 2.31507.      (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+DLL detaching from process...
+ ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La division de 16.9 par 7.3 vaut 2.31507.      (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+DLL detaching from process...
+ *************   Lancement du script python 32 bits de test de la DLL (surprising! only 32 bits run)    ***************
+Version python : 3.12 32bit
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+        Fin de la generation de la DLL et des tests avec Open Watcom 32 bits ou 64 bits.
+		
+Puis, une nouvelle génération en deux passes (32 bits puis 64 bits) :
+
+"compile_link_dll_OW.bat TWO ALL"
+ Lancement du batch de generation d'une DLL et deux tests de celle-ci avec Open Watcom 32 bits ou 64 bits
+ *********  Quelques caracteristiques du systeme hebergeant l'environnement de developpement.   ***********
+Name
+Microsoft Windows 11 Famille|C:\WINDOWS|\Device\Harddisk1\Partition3
+
+Version
+10.0.22631
+
+OSArchitecture
+64-bit
+
+ **********      Pour cette generation le premier parametre vaut "TWO" et le deuxieme "ALL".     *************
+ ******************            Compilation de la DLL en mode 32 bits        *******************
+ ************                                    Dump des symboles exportes avec l option -v                                              *************
+        1 fichier(s) copié(s).
+//#line "src\dll_core.c" 7
+extern int __stdcall LibMain(void *hinstDll,unsigned long hinstDll,void *hinstDll);
+//#line "src\dll_core.c" 42
+extern int __export Hello(void );
+//#line "src\dll_core.c" 48
+extern int __export Addint(int i1,int i1);
+//#line "src\dll_core.c" 53
+extern int __export Subint(int i1,int i1);
+//#line "src\dll_core.c" 58
+extern int __export Multint(int i1,int i1);
+//#line "src\dll_core.c" 63
+extern int __export Divint(int i1,int i1);
+//#line "src\dll_core.c" 73
+extern int __export Squarint(int i);
+//#line "src\dll_core.c" 78
+extern double __export Adddbl(double i1,double i1);
+//#line "src\dll_core.c" 83
+extern double __export Subdbl(double i1,double i1);
+//#line "src\dll_core.c" 88
+extern double __export Multdbl(double i1,double i1);
+//#line "src\dll_core.c" 93
+extern double __export Divdbl(double i1,double i1);
+//#line "src\dll_core.c" 103
+extern double __export Squardbl(double i);
+ ************                                    Dump des sysboles exportes de la DLL dll_core.dll                                        *************
+
+Adddbl.'DLL_CORE.DLL'.7
+Addint.'DLL_CORE.DLL'.2
+Divdbl.'DLL_CORE.DLL'.10
+Divint.'DLL_CORE.DLL'.5
+Hello.'DLL_CORE.DLL'.1
+Multdbl.'DLL_CORE.DLL'.9
+Multint.'DLL_CORE.DLL'.4
+Squardbl.'DLL_CORE.DLL'.11
+Squarint.'DLL_CORE.DLL'.6
+Subdbl.'DLL_CORE.DLL'.8
+Subint.'DLL_CORE.DLL'.3
+_Adddbl.'DLL_CORE.DLL'.18
+_Addint.'DLL_CORE.DLL'.13
+_Divdbl.'DLL_CORE.DLL'.21
+_Divint.'DLL_CORE.DLL'.16
+_Hello.'DLL_CORE.DLL'.12
+_Multdbl.'DLL_CORE.DLL'.20
+_Multint.'DLL_CORE.DLL'.15
+_Squardbl.'DLL_CORE.DLL'.22
+_Squarint.'DLL_CORE.DLL'.17
+_Subdbl.'DLL_CORE.DLL'.19
+_Subint.'DLL_CORE.DLL'.14
+ ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------         Lancement des operations arithmetiques avec des entiers            -------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294  (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+La division de 16.9 par 7.3 vaut 2.31507.      (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+DLL detaching from process...
+ ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La division de 16.9 par 7.3 vaut 2.31507.      (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+DLL detaching from process...
+ ****************               Lancement du script python 32 bits de test de la DLL.               ********************
+Version python : 3.12 32bit
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+ ******************          Compilation de la DLL en mode 64 bits        *******************
+ ************                                    Dump des symboles exportes avec l option -v                                              *************
+        1 fichier(s) copié(s).
+//#line "src\dll_core.c" 7
+extern int __stdcall LibMain(void *hinstDll,unsigned long hinstDll,void *hinstDll);
+//#line "src\dll_core.c" 42
+extern int __export Hello(void );
+//#line "src\dll_core.c" 48
+extern int __export Addint(int i1,int i1);
+//#line "src\dll_core.c" 53
+extern int __export Subint(int i1,int i1);
+//#line "src\dll_core.c" 58
+extern int __export Multint(int i1,int i1);
+//#line "src\dll_core.c" 63
+extern int __export Divint(int i1,int i1);
+//#line "src\dll_core.c" 73
+extern int __export Squarint(int i);
+//#line "src\dll_core.c" 78
+extern double __export Adddbl(double i1,double i1);
+//#line "src\dll_core.c" 83
+extern double __export Subdbl(double i1,double i1);
+//#line "src\dll_core.c" 88
+extern double __export Multdbl(double i1,double i1);
+//#line "src\dll_core.c" 93
+extern double __export Divdbl(double i1,double i1);
+//#line "src\dll_core.c" 103
+extern double __export Squardbl(double i);
+ ************                                    Dump des symboles exportes de la DLL dll_core64.dll                                      *************
+
+Adddbl.'DLL_CORE64.DLL'.7
+Addint.'DLL_CORE64.DLL'.2
+Divdbl.'DLL_CORE64.DLL'.10
+Divint.'DLL_CORE64.DLL'.5
+Hello.'DLL_CORE64.DLL'.1
+Multdbl.'DLL_CORE64.DLL'.9
+Multint.'DLL_CORE64.DLL'.4
+Squardbl.'DLL_CORE64.DLL'.11
+Squarint.'DLL_CORE64.DLL'.6
+Subdbl.'DLL_CORE64.DLL'.8
+Subint.'DLL_CORE64.DLL'.3
+_Adddbl.'DLL_CORE64.DLL'.18
+_Addint.'DLL_CORE64.DLL'.13
+_Divdbl.'DLL_CORE64.DLL'.21
+_Divint.'DLL_CORE64.DLL'.16
+_Hello.'DLL_CORE64.DLL'.12
+_Multdbl.'DLL_CORE64.DLL'.20
+_Multint.'DLL_CORE64.DLL'.15
+_Squardbl.'DLL_CORE64.DLL'.22
+_Squarint.'DLL_CORE64.DLL'.17
+_Subdbl.'DLL_CORE64.DLL'.19
+_Subint.'DLL_CORE64.DLL'.14
+ ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------         Lancement des operations arithmetiques avec des entiers            -------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294  (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+La division de 16.9 par 7.3 vaut 2.31507.      (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+DLL detaching from process...
+ ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La division de 16.9 par 7.3 vaut 2.31507.      (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+DLL detaching from process...
+ *************   Lancement du script python 32 bits de test de la DLL (surprising! only 32 bits run)    ***************
+Version python : 3.12 32bit
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+        Fin de la generation de la DLL et des tests avec Open Watcom 32 bits ou 64 bits.
+
+C:\src\Watcom\TestDLL>compile_link_dll_OW_OK.bat TWO ALL
+ Lancement du batch de generation d'une DLL et deux tests de celle-ci avec Open Watcom 32 bits ou 64 bits
+ *********  Quelques caracteristiques du systeme hebergeant l'environnement de developpement.   ***********
+Name
+Microsoft Windows 11 Famille|C:\WINDOWS|\Device\Harddisk1\Partition3
+
+Version
+10.0.22631
+
+OSArchitecture
+64-bit
+
+ **********      Pour cette generation le premier parametre vaut "TWO" et le deuxieme "ALL".     *************
+ ******************            Compilation de la DLL en mode 32 bits        *******************
+ ************                                    Dump des symboles exportes avec l option -v                                              *************
+        1 fichier(s) copié(s).
+//#line "src\dll_core.c" 7
+extern int __stdcall LibMain(void *hinstDll,unsigned long hinstDll,void *hinstDll);
+//#line "src\dll_core.c" 42
+extern int __export Hello(void );
+//#line "src\dll_core.c" 48
+extern int __export Addint(int i1,int i1);
+//#line "src\dll_core.c" 53
+extern int __export Subint(int i1,int i1);
+//#line "src\dll_core.c" 58
+extern int __export Multint(int i1,int i1);
+//#line "src\dll_core.c" 63
+extern int __export Divint(int i1,int i1);
+//#line "src\dll_core.c" 73
+extern int __export Squarint(int i);
+//#line "src\dll_core.c" 78
+extern double __export Adddbl(double i1,double i1);
+//#line "src\dll_core.c" 83
+extern double __export Subdbl(double i1,double i1);
+//#line "src\dll_core.c" 88
+extern double __export Multdbl(double i1,double i1);
+//#line "src\dll_core.c" 93
+extern double __export Divdbl(double i1,double i1);
+//#line "src\dll_core.c" 103
+extern double __export Squardbl(double i);
+ ************                                    Dump des sysboles exportes de la DLL dll_core.dll                                        *************
+
+Adddbl.'DLL_CORE.DLL'.7
+Addint.'DLL_CORE.DLL'.2
+Divdbl.'DLL_CORE.DLL'.10
+Divint.'DLL_CORE.DLL'.5
+Hello.'DLL_CORE.DLL'.1
+Multdbl.'DLL_CORE.DLL'.9
+Multint.'DLL_CORE.DLL'.4
+Squardbl.'DLL_CORE.DLL'.11
+Squarint.'DLL_CORE.DLL'.6
+Subdbl.'DLL_CORE.DLL'.8
+Subint.'DLL_CORE.DLL'.3
+_Adddbl.'DLL_CORE.DLL'.18
+_Addint.'DLL_CORE.DLL'.13
+_Divdbl.'DLL_CORE.DLL'.21
+_Divint.'DLL_CORE.DLL'.16
+_Hello.'DLL_CORE.DLL'.12
+_Multdbl.'DLL_CORE.DLL'.20
+_Multint.'DLL_CORE.DLL'.15
+_Squardbl.'DLL_CORE.DLL'.22
+_Squarint.'DLL_CORE.DLL'.17
+_Subdbl.'DLL_CORE.DLL'.19
+_Subint.'DLL_CORE.DLL'.14
+ ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------         Lancement des operations arithmetiques avec des entiers            -------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294  (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+La division de 16.9 par 7.3 vaut 2.31507.        (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit.exe)
+DLL detaching from process...
+ ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La division de 16.9 par 7.3 vaut 2.31507.        (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+DLL detaching from process...
+ ****************               Lancement du script python 32 bits de test de la DLL.               ********************
+Version python : 3.12 32bit
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+ ******************          Compilation de la DLL en mode 64 bits        *******************
+ ************                                    Dump des symboles exportes avec l option -v                                              *************
+        1 fichier(s) copié(s).
+//#line "src\dll_core.c" 7
+extern int __stdcall LibMain(void *hinstDll,unsigned long hinstDll,void *hinstDll);
+//#line "src\dll_core.c" 42
+extern int __export Hello(void );
+//#line "src\dll_core.c" 48
+extern int __export Addint(int i1,int i1);
+//#line "src\dll_core.c" 53
+extern int __export Subint(int i1,int i1);
+//#line "src\dll_core.c" 58
+extern int __export Multint(int i1,int i1);
+//#line "src\dll_core.c" 63
+extern int __export Divint(int i1,int i1);
+//#line "src\dll_core.c" 73
+extern int __export Squarint(int i);
+//#line "src\dll_core.c" 78
+extern double __export Adddbl(double i1,double i1);
+//#line "src\dll_core.c" 83
+extern double __export Subdbl(double i1,double i1);
+//#line "src\dll_core.c" 88
+extern double __export Multdbl(double i1,double i1);
+//#line "src\dll_core.c" 93
+extern double __export Divdbl(double i1,double i1);
+//#line "src\dll_core.c" 103
+extern double __export Squardbl(double i);
+ ************                                    Dump des symboles exportes de la DLL dll_core64.dll                                      *************
+
+Adddbl.'DLL_CORE64.DLL'.7
+Addint.'DLL_CORE64.DLL'.2
+Divdbl.'DLL_CORE64.DLL'.10
+Divint.'DLL_CORE64.DLL'.5
+Hello.'DLL_CORE64.DLL'.1
+Multdbl.'DLL_CORE64.DLL'.9
+Multint.'DLL_CORE64.DLL'.4
+Squardbl.'DLL_CORE64.DLL'.11
+Squarint.'DLL_CORE64.DLL'.6
+Subdbl.'DLL_CORE64.DLL'.8
+Subint.'DLL_CORE64.DLL'.3
+_Adddbl.'DLL_CORE64.DLL'.18
+_Addint.'DLL_CORE64.DLL'.13
+_Divdbl.'DLL_CORE64.DLL'.21
+_Divint.'DLL_CORE64.DLL'.16
+_Hello.'DLL_CORE64.DLL'.12
+_Multdbl.'DLL_CORE64.DLL'.20
+_Multint.'DLL_CORE64.DLL'.15
+_Squardbl.'DLL_CORE64.DLL'.22
+_Squarint.'DLL_CORE64.DLL'.17
+_Subdbl.'DLL_CORE64.DLL'.19
+_Subint.'DLL_CORE64.DLL'.14
+ ************     Generation et lancement du premier programme de test de la DLL en mode implicite.      *************
+DLL attaching to process...
+Hello from a DLL!
+----------------------         Lancement des operations arithmetiques avec des entiers            -------------------
+Le resultat de l'addition de 42 plus 7 vaut : 49         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le resultat de la soustraction de 42 moins 7 vaut : 35   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le resultat de la multiplication de 42 par 7 vaut : 294  (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le resultat de la division de 42 par 7 vaut : 6.         (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le carre de 7 par 7 vaut : 49.                           (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+La division de 16.9 par 7.3 vaut 2.31507.        (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with implicit load of DLL C:\src\Watcom\TestDLL\testdll_implicit64.exe)
+DLL detaching from process...
+ ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La division de 16.9 par 7.3 vaut 2.31507.        (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+DLL detaching from process...
+ *************   Lancement du script python 32 bits de test de la DLL (surprising! only 32 bits run)    ***************
+Version python : 3.12 32bit
+DLL attaching to process...
+Hello from a DLL!
+----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
+La somme de 42 plus 7 vaut 49.                  (from script python testdll_cdecl.py)
+La difference de 42 moins 7 vaut 35.            (from script python testdll_cdecl.py)
+La multiplication de 42 par 7 vaut 294.         (from script python testdll_cdecl.py)
+La division de 42 par 7 vaut 6.                 (from script python testdll_cdecl.py)
+Le carre de 7 par 7 vaut 49.                    (from script python testdll_cdecl.py)
+----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
+La somme de 16.9 plus 7.3 vaut 24.2.                  (from script python testdll_cdecl.py)
+La difference de 16.9 moins 7.3 vaut 9.6.             (from script python testdll_cdecl.py)
+La multiplication de 16.9 par 7.3 vaut 123.37.        (from script python testdll_cdecl.py)
+La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdll_cdecl.py)
+Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
+DLL detaching from process...
+        Fin de la generation de la DLL et des tests avec Open Watcom 32 bits ou 64 bits.
+
+Premier constat, seul le passage en mode d'appel "__cdecl" a permis de couvrir correctement tous les tests 
+attendus, y compris celui avec le script python. Si on reste en "__watcall" (le mode par défaut), seuls les deux
+programmes de tests avec chargement implicite puis explicite de la DLL fonctionnent correctement. Le script
+python lui fait n'importe quoi sur les calculs sur des entiers, mais pas sur les "double". Pourquoi ?!?
+
+On peut aussi noter que le test python, après la génération d'une DLL avec le compilateur Open Watcom version
+64 bits, ne fonctionne correctement qu'avec la version 32 bits du language de script python et pas avec la version
+64 bits. Etrange, là aussi ? Ne serait-ce pas parce que seuls les exécutables du compilateur Open Watcom ont été migrés 
+en 64 bits, mais pas les librairies (les deux répertoires des librairies restent inchangés dans la version 32 comme
+64 bits) ?
+J'ai vérifié par l'utilitaire "file" de GNU sur la DLL "dll_core64.dll" et voici le résultat :
+
+"file dll_core64.dll"
+dll_core64.dll; PE32 executable for MS Windows (DLL) (GUI) Intel 80386 32-bit
+
+Et un coup de "file" sur chacun des exécutables "testdll_implicit64.exe" et "testdll_explicit64.exe" donne le même 
+résultat... qui confirme la version 32 bits :
+
+"file testdll_explicit64.exe"
+testdll_explicit64.exe; PE32 executable for MS Windows (console) Intel 80386 32-bit
+
+Il est donc bien confirmé que la DLL comme les exécutables générés avec l'environnement Open Watcom en version 64 bits 
+restent en version 32 bits ..., ce qui enlève un intérêt certain à cette génération du coup, si je compare au compilateur
+Pelles C par exemple, ou même lcc.
+
+Deuxième constat, pour pouvoir appeller correctement les fonctions, sans la décoration d'appel avec le préfixe "_" 
+en début de chaque fonction, j'ai été obligé de passer par une astuce complementaire : l'utilisation d'un fichier 
+spécial d'extension ".lbc" (un équivalent des fichiers de définition) pour donner un alias à chaque fonction sans 
+préfixe "_". Il suffit ensuite d'inclure ce fichier avec l'option "EXPORTS=namefile.lbc" pour que le linker le 
+charge afin d'étendre les symboles exportés avec les alias pouvant être définis dans ce fichier.
+
+Troisième constat, l'usage de l'option "-v" (export dans un fichier de définition) nous restitue un résultat plus 
+qu'étrange : il nous donne le listing des instructions préfixées par "__export" (dont le point d'entrée LibMain par 
+défaut), l'équivalent de "__decl(export)" de Microsoft, dans le code. 
+Bon, oui, mais inutile ... je connais le code...
+Il serait beaucoup plus intéressant de générer un fichier de type "*.lbc" car ceux-ci nous ont permis d'appeler 
+les fonctions directement par leurs noms de déclaration ... sans fioritures (name mangling !!!).
+Certes, l'environnement Open Watcom n'apporte pas d'utilitaire de type "impdef", seul l'appel à l'option 
+"impfile=deffile.def" est accessible lors du linkage, mais alors seule sur la ligne de commande, sans sa petite 
+soeur l'option "implib=libfile.lib" ... 
+Si vous souhaitez obtenir les deux générations, il faut alors privilégier l'option "impfile=xxxxx" lors de l'édition 
+des liens de la DLL, puis générer la librairie par l'utilitaire "wlib". 
+
+Et pour finir, je viens de l'évoquer, j'ai aussi résolu l'absence de "génération" du fichier lib associé à la DLL, 
+lors des éditions des liens.
+Il suffit de ne pas rajouter l'option "impfile=dll_core[64].def", et ne laisser que celle de la génération de la 
+librairie statique ("implib=dll_core[64].lib") pour s'éviter ainsi la génération explicite de cette librairie 
+avec l'utilitaire "wlib" (solution de contournement, qui reste une option possible).
+
+Et là, on peut dire que ces tests sont très positifs, car rien ne manque, en 32 bits comme en 64 bits, même si cela
+ne présente aucun intérêt vu que la version 64 bits du compilateur OW ne génère que des exécutables en 32 bits.
+Ainsi, quel que soit la version du compilateur, tout fonctionne parfaitement, aussi bien l'appel du point d'entrée 
+principal des DLL (ici LibMain), que les appels des fonctions internes aux DLL, et le test en python 32 bits donne
+lui aussi de bons résultats.
+
+Conclusion :
+
+Malgrè des dysfonctionnements et après pas mal d'investigations, le compilateur Open Watcom permet donc de générer 
+des DLL opérationnelles sous Windows 11 version 64 bits, mais uniquement en version 32 bits ..., en "une passe" 
+(compilation + linkage dans la même instruction) ou en "deux passes" (compilation puis linkage séparés) sans trop 
+de difficulté.
+
+Voici les grandes lignes à retenir pour obtenir ce résultat :
+
+	a) Si vous utilisez dans le code principal de la DLL le point d'entrée LibMain (équivalent de DllMain), il 
+		faut le préfixer par APIENTRY,
+	b) Pour toutes les fonctions déclarées comme accessibles dans votre DLL, il faut les préfixer par "__declspec(dllexport)" 
+	   ou par "__declspec(dllimport)". Et dans le fichier d'include partagé entre la génération de la DLL et 
+	   son utilisation dans des programmes de test, il faut déclarer toutes ces fonctions en "extern".
+	c) Dans le fichier principal de votre DLL, il faut, après avoir inclus le fichier d'include précédent, déclarer
+	    le corps de chaque fonction en les préfixant par "__declspec(dllexport)", et compiler avec le define 
+		"BUILD_DLL" (astuce de Mark Payne).
+	d) Durant la génération de la DLL, ne pas oublier de constituer le fichier lib correspondant avec l'option du linker 
+		("option implib=dll_core[64].lib"). C'est ce fichier d'extension ".lib" qui servira ensuite à la résolution 
+		des symboles "externes" lors de l'édition des liens des programmes de test de la DLL (chargement implicite).
+	e) et enfin, pour éviter l'indétermination des symboles liés aux fonctions de la DLL lorsqu'elles sont préfixées
+	    par des "_" lors de leur usage hors de l'environnement Watcom, il est aussi nécessaire de constituer un fichier de  
+		définition pour rajouter des alias des fonctions sans suffixe de chaque fonction. Ce fichier d'extension ".lbc" a un 
+		format très particulier, mais en générant automatiquement le fichier de définition des fonctions définies lors de 
+		l'édition de liens des DLL ("option impfile=dll_core[64].def"), on arrive à déterminer le format général de ce 
+		fichier qui présente toujours le même format :
+			++'symbol'.'name_dll'.'altsymbol'.'symbol'
+		C'est sur 'altsymbol' qu'il est nécessaire d'agir pour "enlever" le préfixe par défaut "_" des noms des fonctions
+		(car c'est le "mangling" des symboles rajouté par le choix d'appel "__cdecl", si on laisse le choix par défaut
+		"__watcall", c'est au contraire un suffixe "_" qui est rajouter à chaque symbole).
+		On peut constater le bon résultat de cette deuxième "astuce" lors du "dump" des symboles exportées des DLL par 
+		l'utilitaire "wdump".
+
+Retenez bien que la génération avec les outils Open Watcom en version 64 bits ne donnent que des résultats en 32 bits.
+A quand, la génération en 64 bits ?
