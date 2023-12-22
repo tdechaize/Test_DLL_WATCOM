@@ -54,7 +54,7 @@ echo. ******************            Compilation de la DLL en mode 32 bits       
 REM      Mandatory, add to PATH the binary directory of compiler OW 32 bits. You can adapt this directory at your personal software environment.
 set PATH=C:\WATCOM\binnt;%PATH%
 set "PAR1=%~1"
-if PAR1 == "TWO" (
+if "%PAR1%" == "TWO" (
 REM     Options used by Open Watcom compiler 32 bits
 REM 		-q       					Set to quiet mode
 REM 		-bd       					Set option to build DLL 
@@ -146,7 +146,7 @@ echo. ******************          Compilation de la DLL en mode 64 bits        *
 REM      Mandatory, add to PATH the binary directory of compiler OW 64 bits. You can adapt this directory at your personal software environment.
 set PATH=C:\WATCOM\binnt64;%PATH%
 set "PAR1=%~1"
-if PAR1 == "TWO" (
+if "%PAR1%" == "TWO" (
 REM     Options used by Open Watcom compiler 64 bits
 REM 		-q       					Set to quiet mode
 REM 		-bd       					Set option to build DLL 
@@ -183,12 +183,12 @@ REM 	Options used by linker of Open Watcom compiler
 REM 		-subsystem console 	Define subsystem to console, because generation of console application 
 wlink option quiet system nt run console LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 name testdll_implicit64.exe file testdll_implicit64.obj lib dll_core64.lib
 REM 	Run test program of DLL with implicit load
-testdll64_implicit64.exe
+testdll_implicit64.exe
 echo. ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
 wcc386 -q -bc -bt=nt -d0 -ecc -dNDEBUG -d_WIN32 -d__OW64__ src\testdll_explicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fo=testdll_explicit64.obj
 wlink option quiet system nt run console LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 name testdll_explicit64.exe file testdll_explicit64.obj lib dll_core64.lib
 REM 	Run test program of DLL with explicit load
-testdll64_explicit.exe					
+testdll_explicit.exe					
  ) ELSE (
 REM     Options used by Open Watcom compiler 32 bits
 REM 		-q       					Set to quiet mode

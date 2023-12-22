@@ -702,7 +702,7 @@ echo. ******************            Compilation de la DLL en mode 32 bits       
 REM      Mandatory, add to PATH the binary directory of compiler OW 32 bits. You can adapt this directory at your personal software environment.
 set PATH=C:\WATCOM\binnt;%PATH%
 set "PAR1=%~1"
-if PAR1 == "TWO" (
+if "%PAR1%" == "TWO" (
 REM     Options used by Open Watcom compiler 32 bits
 REM 		-q       					Set to quiet mode
 REM 		-bd       					Set option to build DLL 
@@ -792,7 +792,7 @@ echo. ******************          Compilation de la DLL en mode 64 bits        *
 REM      Mandatory, add to PATH the binary directory of compiler OW 64 bits. You can adapt this directory at your personal software environment.
 set PATH=C:\WATCOM\binnt64;%PATH%
 set "PAR1=%~1"
-if PAR1 == "TWO" (
+if "%PAR1%" == "TWO" (
 REM     Options used by Open Watcom compiler 64 bits
 REM 		-q       					Set to quiet mode
 REM 		-bd       					Set option to build DLL 
@@ -828,12 +828,12 @@ REM 	Options used by linker of Open Watcom compiler
 REM 		-subsystem console 	Define subsystem to console, because generation of console application 
 wlink option quiet system nt run console LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 name testdll_implicit64.exe file testdll_implicit64.obj lib dll_core64.lib
 REM 	Run test program of DLL with implicit load
-testdll64_implicit64.exe
+testdll_implicit64.exe
 echo. ************     Generation et lancement du deuxieme programme de test de la DLL en mode explicite.     ************
 wcc386 -q -bc -bt=nt -d0 -ecc -dNDEBUG -d_WIN32 -d__OW64__ src\testdll_explicit.c -i=C:\WATCOM\h\nt -i=C:\WATCOM\h -fo=testdll_explicit64.obj
 wlink option quiet system nt run console LIBP C:\WATCOM\lib386\nt;C:\WATCOM\lib386 name testdll_explicit64.exe file testdll_explicit64.obj lib dll_core64.lib
 REM 	Run test program of DLL with explicit load
-testdll64_explicit.exe					
+testdll_explicit.exe					
  ) ELSE (
 REM     Options used by Open Watcom compiler 32 bits
 REM 		-q       					Set to quiet mode
@@ -1203,7 +1203,7 @@ OSArchitecture
 
  **********      Pour cette generation le premier parametre vaut "TWO" et le deuxieme "ALL".     *************
  ******************            Compilation de la DLL en mode 32 bits        *******************
- ************                                    Dump des symboles exportes avec l option -v                                              *************
+ ************                                    Dump des symboles exportes avec l option -v                                     *************
         1 fichier(s) copié(s).
 //#line "src\dll_core.c" 7
 extern int __stdcall LibMain(void *hinstDll,unsigned long hinstDll,void *hinstDll);
@@ -1229,7 +1229,8 @@ extern double __export Multdbl(double i1,double i1);
 extern double __export Divdbl(double i1,double i1);
 //#line "src\dll_core.c" 103
 extern double __export Squardbl(double i);
- ************                                    Dump des sysboles exportes de la DLL dll_core.dll                                        *************
+ *****************           Edition des liens .ie. linkage de la DLL.        ***************
+ ************                                    Dump des sysboles exportes de la DLL dll_core.dll                       *************
 
 Adddbl.'DLL_CORE.DLL'.7
 Addint.'DLL_CORE.DLL'.2
@@ -1285,8 +1286,7 @@ La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit l
 La division de 16.9 par 7.3 vaut 2.31507.      (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
 Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
 DLL detaching from process...
- ****************               Lancement du script python 32 bits de test de la DLL.               ********************
-Version python : 3.12 32bit
+ ****************               Lancement du script python 32 bits de test de la DLL.               ********************Version python : 3.12 32bit
 DLL attaching to process...
 Hello from a DLL!
 ----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
@@ -1303,7 +1303,7 @@ La division de 16.9 par 7.3 vaut 2.31507.             (from script python testdl
 Le carre de 7.3 par 7.3 vaut 53.29.                   (from script python testdll_cdecl.py)
 DLL detaching from process...
  ******************          Compilation de la DLL en mode 64 bits        *******************
- ************                                    Dump des symboles exportes avec l option -v                                              *************
+ ************                                    Dump des symboles exportes avec l option -v                                     *************
         1 fichier(s) copié(s).
 //#line "src\dll_core.c" 7
 extern int __stdcall LibMain(void *hinstDll,unsigned long hinstDll,void *hinstDll);
@@ -1329,7 +1329,8 @@ extern double __export Multdbl(double i1,double i1);
 extern double __export Divdbl(double i1,double i1);
 //#line "src\dll_core.c" 103
 extern double __export Squardbl(double i);
- ************                                    Dump des symboles exportes de la DLL dll_core64.dll                                      *************
+ *****************           Edition des liens .ie. linkage de la DLL.        ***************
+ ************                                    Dump des symboles exportes de la DLL dll_core64.dll                     *************
 
 Adddbl.'DLL_CORE64.DLL'.7
 Addint.'DLL_CORE64.DLL'.2
@@ -1373,17 +1374,17 @@ DLL detaching from process...
 DLL attaching to process...
 Hello from a DLL!
 ----------------------       Lancement des operations arithmetiques avec des entiers        -----------------------
-La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
-La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
-La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
-La division de 42 par 7 vaut 6.         (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
-Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La somme de 42 plus 7 vaut 49.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La soustraction de 42 moins 7 vaut 35.  (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La multiplication de 42 par 7 vaut 294. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La division de 42 par 7 vaut 6.         (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+Le carre de 7 par 7 vaut 49.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
 ----------------------    Lancement des operations arithmetiques avec des doubles flottants   ---------------------
-La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
-La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
-La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
-La division de 16.9 par 7.3 vaut 2.31507.      (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
-Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit64.exe)
+La somme de 16.9 plus 7.3 vaut 24.20.          (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La soustraction de 16.9 moins 7.3 vaut 9.60.   (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La multiplication de 16.9 par 7.3 vaut 123.37. (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+La division de 16.9 par 7.3 vaut 2.31507.      (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
+Le carre de 7.3 par 7.3 vaut 53.29.            (from application with explicit load of DLL C:\src\Watcom\TestDLL\testdll_explicit.exe)
 DLL detaching from process...
  *************   Lancement du script python 32 bits de test de la DLL (surprising! only 32 bits run)    ***************
 Version python : 3.12 32bit
@@ -1652,7 +1653,7 @@ charge afin d'étendre les symboles exportés avec les alias pouvant être défi
 
 Troisième constat, l'usage de l'option "-v" (export dans un fichier de définition) nous restitue un résultat plus 
 qu'étrange : il nous donne le listing des instructions préfixées par "__export" (dont le point d'entrée LibMain par 
-défaut), l'équivalent de "__decl(export)" de Microsoft, dans le code. 
+défaut), l'équivalent de "__decl(dllexport)" de Microsoft, dans le code. 
 Bon, oui, mais inutile ... je connais le code...
 Il serait beaucoup plus intéressant de générer un fichier de type "*.lbc" car ceux-ci nous ont permis d'appeler 
 les fonctions directement par leurs noms de déclaration ... sans fioritures (name mangling !!!).
@@ -1708,4 +1709,4 @@ Voici les grandes lignes à retenir pour obtenir ce résultat :
 		l'utilitaire "wdump".
 
 Retenez bien que la génération avec les outils Open Watcom en version 64 bits ne donnent que des résultats en 32 bits.
-A quand, la génération en 64 bits ?
+Vu la qualité de ce compilateur, je dirais : "A quand, la génération en 64 bits ?".
